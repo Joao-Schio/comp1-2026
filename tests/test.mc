@@ -4,11 +4,6 @@
 // reservadas, identificadores, constantes inteiras, de caractere e de
 // string, operadores aritmeticos, relacionais e logicos, simbolos de
 // pontuacao, alem de comentarios de linha e de bloco.
-//
-// LEMBRETE: este teste NAO cobre todos os casos (em especial, poucos
-// casos de erro lexico). Parte do trabalho e ampliar este arquivo com
-// testes proprios que exercitem seu scanner de forma mais completa,
-// incluindo entradas invalidas (veja a Secao 4.1 do enunciado).
 
 /* Calcula o fatorial de um numero inteiro utilizando um laco for. */
 int fatorial(int n) {
