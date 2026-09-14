@@ -297,7 +297,7 @@ ALFANUM     [a-zA-Z0-9_]
                         return UNDEF;
                     }
 
- /* --- Operadores relacionais e logicos ---------------------------------
+ /* --- Operadores relacionais e logicos ---------------------------------*/
 "=="                { return EQ; }
 "="                 { return ASSIGN; }
 "!="                { return NEQ; }
