@@ -1,13 +1,10 @@
 /*
  * microc.flex
  *
- * Esqueleto do analisador lexico (scanner) para a linguagem Micro C.
+ * Analisador lexico (scanner) para a linguagem Micro C.
  * Disciplina: Compiladores I - FACOM
  *
- * Este arquivo NAO esta completo. Partes do reconhecimento de tokens
- * foram implementadas apenas como EXEMPLO, para orienta-lo(a) sobre o
- * padrao a seguir. As demais estao marcadas com "TODO(aluno)" e devem
- * ser completadas por voce.
+ * Implementacao do Trabalho Pratico 1 a partir do esqueleto fornecido.
  *
  * Compilacao:
  *      flex microc.flex
@@ -78,10 +75,51 @@ YYSTYPE microc_yylval;
 int linha_atual = 1;
 
 /* Funcao auxiliar para preencher microc_yylval.symbol com uma copia do
- * texto reconhecido (yytext). Sinta-se livre para usar/adaptar. */
+ * texto reconhecido (yytext). */
 static void guarda_lexema(void) {
     microc_yylval.symbol = strdup(yytext);
 }
+
+/* Converte as sequencias de escape exigidas para constantes de caractere
+ * e string. O texto recebido inclui as aspas delimitadoras. */
+static char *converte_literal(const char *texto, size_t tamanho) {
+    char *saida = malloc(tamanho + 1);
+    size_t i;
+    size_t j = 0;
+
+    if (!saida) {
+        fprintf(stderr, "Erro: memoria insuficiente\n");
+        exit(EXIT_FAILURE);
+    }
+
+    for (i = 1; i + 1 < tamanho; i++) {
+        if (texto[i] == '\\' && i + 1 < tamanho - 1) {
+            char proximo = texto[++i];
+
+            switch (proximo) {
+                case 'n':  saida[j++] = '\n'; break;
+                case 't':  saida[j++] = '\t'; break;
+                case '\\': saida[j++] = '\\'; break;
+                case '"':  saida[j++] = '"';  break;
+                case '\'': saida[j++] = '\''; break;
+                case '0':  saida[j++] = '\0'; break;
+                default:
+                    /* Escape nao listado: preserva exatamente o texto lido. */
+                    saida[j++] = '\\';
+                    saida[j++] = proximo;
+                    break;
+            }
+        } else {
+            saida[j++] = texto[i];
+        }
+    }
+
+    saida[j] = '\0';
+    return saida;
+}
+
+/* Numero de caracteres logicos dentro da constante de caractere atual. */
+static int caracteres_char = 0;
 
 %}
 
@@ -93,7 +131,7 @@ DIGIT       [0-9]
 LETRA       [a-zA-Z_]
 ALFANUM     [a-zA-Z0-9_]
 
-%x COMMENT
+%x COMMENT STRING CHARLIT NEGATIVE
 
 %%
 
@@ -113,8 +151,8 @@ ALFANUM     [a-zA-Z0-9_]
 [ \t\r]+            { /* ignora espacos em branco */ }
 
  /* --- Comentarios ------------------------------------------------------
-  * Estes ja estao implementados como exemplo de uso de estados (%x) e
-  * de tratamento de erro via EOF dentro de um estado especial. */
+  * Estados exclusivos permitem consumir todo o comentario sem produzir
+  * tokens, mantendo a contagem correta de linhas. */
 "//".*              { /* comentario de linha: ignora ate o fim da linha */ }
 
 "/*"                { BEGIN(COMMENT); }
@@ -122,6 +160,7 @@ ALFANUM     [a-zA-Z0-9_]
 <COMMENT>\n         { linha_atual++; }
 <COMMENT><<EOF>>    {
                         microc_yylval.error_msg = "EOF em comentario";
+                        BEGIN(INITIAL);
                         return UNDEF;
                     }
 <COMMENT>.          { /* consome qualquer outro caractere dentro do comentario */ }
@@ -132,72 +171,162 @@ ALFANUM     [a-zA-Z0-9_]
                         return UNDEF;
                     }
 
- /* --- Palavras reservadas e identificadores ----------------------------
-  * TODO(aluno): atualmente TODA sequencia de letras/underscore e
-  * devolvida como ID. Voce deve comparar o lexema reconhecido com cada
-  * palavra reservada da linguagem (main, if, else, for, return, int,
-  * char, print) e devolver o token especifico quando houver
-  * correspondencia. Use strcmp(), conforme discutido em aula, ou uma
-  * tabela hash caso queira ir alem do exigido. Nao esqueca de chamar
-  * guarda_lexema() (ou equivalente) quando o token for de fato ID. */
+ /* --- Palavras reservadas e identificadores ---------------------------- */
 {LETRA}{ALFANUM}*   {
-                        /* TODO(aluno): reconhecer palavras reservadas aqui */
+                        if (strcmp(yytext, "main") == 0)   return MAIN;
+                        if (strcmp(yytext, "if") == 0)     return IF;
+                        if (strcmp(yytext, "else") == 0)   return ELSE;
+                        if (strcmp(yytext, "for") == 0)    return FOR;
+                        if (strcmp(yytext, "return") == 0) return RETURN;
+                        if (strcmp(yytext, "int") == 0)    return INT;
+                        if (strcmp(yytext, "char") == 0)   return CHAR;
+                        if (strcmp(yytext, "print") == 0)  return PRINT;
+
                         guarda_lexema();
                         return ID;
                     }
 
- /* --- Constantes inteiras -----------------------------------------------
-  * TODO(aluno): o padrao formal para um inteiro em Micro C e um ou mais
-  * digitos, opcionalmente precedidos de um sinal de menos (numeros
-  * negativos). A regra abaixo trata apenas inteiros sem sinal; use a
-  * tecnica de lookahead discutida em aula (veja o operador MINUS mais
-  * abaixo) para decidir quando um '-' faz parte do numero e quando ele
-  * e, na verdade, o operador de subtracao. */
+ /* --- Constantes inteiras -----------------------------------------------*/
 {DIGIT}+            {
                         guarda_lexema();
                         return INTEGERCONST;
                     }
+<NEGATIVE>{DIGIT}+  {
+                        BEGIN(INITIAL);
+                        guarda_lexema();
+                        return INTEGERCONST;
+                    }
 
- /* --- Constantes de caractere --------------------------------------------
-  * TODO(aluno): reconhecer o padrao 'x' (aspas simples, um caractere,
-  * aspas simples) e devolver CHARCONST. Trate tambem o caso de erro em
-  * que as aspas simples nao sao fechadas corretamente (token UNDEF). */
+ /* --- Constantes de caractere --------------------------------------------*/
+\'                  {
+                        caracteres_char = 0;
+                        BEGIN(CHARLIT);
+                        yymore();
+                    }
 
+<CHARLIT>\\[nt\\\'"0] {
+                        caracteres_char++;
+                        yymore();
+                    }
 
- /* --- Constantes de string -------------------------------------------
-  * TODO(aluno): reconhecer o padrao "[^"\n]*" (uma ou mais aspas
-  * duplas delimitando o conteudo da string) e devolver STRINGCONST.
-  * Voce deve tratar os seguintes erros (veja o enunciado, Secao 4.1):
-  *   - EOF antes do fechamento da string ("EOF em string")
-  *   - quebra de linha nao escapada dentro da string
-  *     ("String nao terminada")
-  *   - caractere nulo dentro da string
-  *     ("String contem caractere nulo")
-  * Alem disso, converta as sequencias de escape (\n, \t, \\, \", \0)
-  * para os caracteres correspondentes antes de armazenar o lexema. */
+<CHARLIT>\\.        {
+                        yymore();
+                    }
 
+<CHARLIT>[^\\\'\n]  {
+                        caracteres_char++;
+                        yymore();
+                    }
+
+<CHARLIT>\'          {
+                        BEGIN(INITIAL);
+
+                        if (caracteres_char != 1) {
+                            microc_yylval.error_msg = "Constante de caractere invalida";
+                            return UNDEF;
+                        }
+
+                        microc_yylval.symbol = converte_literal(yytext, (size_t)yyleng);
+                        return CHARCONST;
+                    }
+
+<CHARLIT>\\\n        {
+                        linha_atual++;
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "Constante de caractere nao terminada";
+                        return UNDEF;
+                    }
+
+<CHARLIT>\n          {
+                        linha_atual++;
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "Constante de caractere nao terminada";
+                        return UNDEF;
+                    }
+
+<CHARLIT><<EOF>>     {
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "EOF em constante de caractere";
+                        return UNDEF;
+                    }
+
+ /* --- Constantes de string -----------------------------------------------*/
+   
+\"                  {
+                        BEGIN(STRING);
+                        yymore();
+                    }
+
+<STRING>\\[nt\\"0]  { yymore(); }
+
+<STRING>\\.         {
+                        yymore();
+                    }
+
+<STRING>[^\\"\n\x00]+ { yymore(); }
+
+<STRING>\x00         {
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "String contem caractere nulo";
+                        return UNDEF;
+                    }
+
+<STRING>\"           {
+                        BEGIN(INITIAL);
+                        microc_yylval.symbol = converte_literal(yytext, (size_t)yyleng);
+                        return STRINGCONST;
+                    }
+
+<STRING>\\\n         {
+                        linha_atual++;
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "String nao terminada";
+                        return UNDEF;
+                    }
+
+<STRING>\n           {
+                        linha_atual++;
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "String nao terminada";
+                        return UNDEF;
+                    }
+
+<STRING><<EOF>>      {
+                        BEGIN(INITIAL);
+                        microc_yylval.error_msg = "EOF em string";
+                        return UNDEF;
+                    }
 
  /* --- Operadores relacionais e logicos ---------------------------------
-  * O caso de '=' esta implementado como EXEMPLO do uso de lookahead
-  * (yytext mostra o que foi casado; voce pode usar input()/unput() ou,
-  * de forma mais simples em flex, escrever as duas alternativas como
-  * regras separadas, deixando o proprio flex escolher o casamento mais
-  * longo -- veja a explicacao na Secao 2 do enunciado). */
 "=="                { return EQ; }
 "="                 { return ASSIGN; }
+"!="                { return NEQ; }
+"!"                 { return NOT; }
+"<="                { return LEQ; }
+"<"                 { return LT; }
+">="                { return GEQ; }
+">"                 { return GT; }
+"&&"                { return AND; }
+"||"                { return OR; }
 
- /* TODO(aluno): complete os demais operadores que compartilham prefixo,
-  * seguindo o mesmo padrao do exemplo acima:
-  *   !=  e  !      ->  NEQ, NOT
-  *   <=  e  <      ->  LEQ, LT
-  *   >=  e  >      ->  GEQ, GT
-  *   &&             ->  AND
-  *   ||             ->  OR
-  */
-
- /* --- Operadores aritmeticos e simbolos de pontuacao (ja prontos) ------ */
+ /* --- Operadores aritmeticos e simbolos de pontuacao ------------------ */
 "+"                 { return PLUS; }
-"-"                 { return MINUS; }
+"-"                 {
+                        int proximo = input();
+
+                        if (proximo >= '0' && proximo <= '9') {
+                            /* Devolve o digito ao fluxo e continua o mesmo
+                             * lexema no estado NEGATIVE. */
+                            unput(proximo);
+                            yymore();
+                            BEGIN(NEGATIVE);
+                        } else {
+                            if (proximo != EOF) {
+                                unput(proximo);
+                            }
+                            return MINUS;
+                        }
+                    }
 "*"                 { return MUL; }
 "/"                 { return DIV; }
 "%"                 { return MOD; }
@@ -232,10 +361,7 @@ int yywrap(void) {
 
 /* main() de teste: le o arquivo passado como argumento e imprime, para
  * cada token reconhecido, seu tipo, lexema e linha -- no mesmo espirito
- * do utilitario "lexer" mencionado no enunciado (Secao 6). Este main()
- * e apenas uma ferramenta de depuracao para voce testar seu scanner de
- * forma isolada; ele NAO faz parte da interface formal entre o scanner
- * e o parser (isso sera tratado nos trabalhos seguintes). */
+ * do utilitario "lexer" mencionado no enunciado. */
 int main(int argc, char **argv) {
     if (argc < 2) {
         fprintf(stderr, "Uso: %s <arquivo.mc>\n", argv[0]);
