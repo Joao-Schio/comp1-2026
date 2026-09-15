@@ -82,3 +82,9 @@ O programa lê o arquivo Micro C informado, imprime os tokens reconhecidos e rep
 - **Trabalho:** TP1 — Análise Léxica para a linguagem Micro C
 
 A submissão deve seguir as instruções específicas informadas pelo professor no AVA (Moodle), dentro do prazo estabelecido no cronograma da disciplina.
+
+## Implementação alternativa em Rust
+
+O analisador léxico também foi implementado em **Rust** sem o uso do Flex.
+
+Confira o projeto: [microc-rs](https://github.com/Joao-Schio/microc-rs)
